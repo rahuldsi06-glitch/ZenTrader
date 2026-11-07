@@ -440,41 +440,52 @@
       }
     }
 
-    let lastKnownTradeId = null;
+    let currentTradesList = [];
+    let localTradeCounter = 6;
+
+    function formatTradeTime(timeStr) {
+      if (!timeStr) return new Date().toLocaleTimeString('en-US', { hour12: false });
+      if (timeStr.includes(' ')) return timeStr.split(' ')[1];
+      if (timeStr.includes('T')) return timeStr.split('T')[1].slice(0, 8);
+      return timeStr;
+    }
+
+    function renderTradesTable(trades) {
+      const tbody = document.getElementById('trade-log');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      trades.forEach(t => {
+        const isProfit = t.realized_pnl_usd >= 0;
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/30';
+        tr.innerHTML = `
+          <td class="py-1.5 text-slate-400 font-mono text-[11px]">${formatTradeTime(t.exit_time || t.entry_time)}</td>
+          <td class="text-slate-300 font-semibold">${t.trade_id}</td>
+          <td class="text-white font-semibold">${t.symbol}</td>
+          <td class="${t.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${t.side === 'LONG' ? '▲ LONG' : '▼ SHORT'}</td>
+          <td>${t.size}</td>
+          <td>$${Number(t.entry_price).toFixed(2)}</td>
+          <td>$${Number(t.exit_price).toFixed(2)}</td>
+          <td class="text-slate-400">${t.slippage_bps} bps</td>
+          <td class="${isProfit ? 'text-emerald-400' : 'text-rose-400'} font-bold">${isProfit ? '+' : ''}$${Number(t.realized_pnl_usd).toFixed(2)}</td>
+          <td><span class="px-1.5 py-0.5 rounded text-[10px] ${isProfit ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}">${t.exit_reason}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
 
     async function fetchTrades() {
       try {
         const res = await apiCall('/trades');
         if (!res.ok) return;
         const trades = await res.json();
-        if (trades.length > 0 && lastKnownTradeId && trades[0].trade_id !== lastKnownTradeId) {
-          const latest = trades[0];
-          const isProf = latest.realized_pnl_usd >= 0;
-          showToast(`⚡ ${latest.side} ${latest.symbol}: ${isProf ? '+' : ''}$${latest.realized_pnl_usd.toFixed(2)} (${latest.exit_reason})`);
-        }
         if (trades.length > 0) {
-          lastKnownTradeId = trades[0].trade_id;
+          if (currentTradesList.length === 0) {
+            currentTradesList = trades;
+            localTradeCounter = trades.length;
+            renderTradesTable(currentTradesList);
+          }
         }
-
-        const tbody = document.getElementById('trade-log');
-        tbody.innerHTML = '';
-        trades.forEach(t => {
-          const isProfit = t.realized_pnl_usd >= 0;
-          const tr = document.createElement('tr');
-          tr.className = 'hover:bg-slate-800/30';
-          tr.innerHTML = `
-            <td class="py-1.5 text-slate-400">${t.trade_id}</td>
-            <td class="text-white font-semibold">${t.symbol}</td>
-            <td class="${t.side === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}">${t.side === 'LONG' ? '▲ LONG' : '▼ SHORT'}</td>
-            <td>${t.size}</td>
-            <td>$${t.entry_price.toFixed(2)}</td>
-            <td>$${t.exit_price.toFixed(2)}</td>
-            <td class="text-slate-400">${t.slippage_bps} bps</td>
-            <td class="${isProfit ? 'text-emerald-400' : 'text-rose-400'} font-bold">${isProfit ? '+' : ''}$${t.realized_pnl_usd.toFixed(2)}</td>
-            <td class="text-slate-400">${t.exit_reason}</td>
-          `;
-          tbody.appendChild(tr);
-        });
       } catch (e) {
         console.error("fetchTrades error:", e);
       }
@@ -952,8 +963,7 @@
     // ==========================================
     // PAPER EXECUTION JOURNAL & LIVE TICKS
     // ==========================================
-    let localTrades = [];
-    let localTradeCount = 6;
+    // local trades tracked in currentTradesList
     let isHalted = false;
 
     function formatTradeTime(timeStr) {
@@ -1027,9 +1037,9 @@
         exit_reason: reason
       };
 
-      localTrades.unshift(newTrade);
-      if (localTrades.length > 50) localTrades.pop();
-      renderLocalTradesTable();
+      currentTradesList.unshift(newTrade);
+      if (currentTradesList.length > 50) currentTradesList.pop();
+      renderTradesTable(currentTradesList);
 
       showToast(`⚡ ${side} ${activeSymbol} • ${netPnl >= 0 ? '+' : ''}$${netPnl.toFixed(2)} (${reason})`);
 
