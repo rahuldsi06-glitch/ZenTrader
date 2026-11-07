@@ -4,6 +4,7 @@ Powers the Gamified Trading Terminal with Live Lightweight-Charts and Telemetry.
 Serverless-ready for Vercel and local runtimes.
 """
 from fastapi import FastAPI, Query
+from typing import Dict, Any, List
 from fastapi.responses import HTMLResponse, JSONResponse
 import os
 import time
@@ -383,6 +384,56 @@ def get_candles(symbol: str = "BTC-PERP"):
         "candles": candles,
         "markers": markers
     }
+
+
+
+
+from zentrader.backtest.audit import run_100_trades_backtest
+
+@app.get("/api/backtest")
+@app.get("/backtest")
+def get_backtest(symbol: str = "BTC-PERP", trades: int = 110):
+    """Returns an institutional 100+ trades walk-forward backtest report and KPIs."""
+    capital = float(supervisor.risk_sentinel.starting_balance)
+    report = run_100_trades_backtest(symbol=symbol, capital=capital, min_trades=trades)
+    return report
+
+
+@app.post("/api/backtest/run")
+@app.post("/backtest/run")
+def trigger_backtest_run(symbol: str = "BTC-PERP", trades: int = 110):
+    """Triggers a fresh institutional 100+ trades backtest run."""
+    capital = float(supervisor.risk_sentinel.starting_balance)
+    seed = random.randint(100, 99999)
+    report = run_100_trades_backtest(symbol=symbol, capital=capital, min_trades=trades, seed=seed)
+    return report
+
+
+@app.post("/api/trades/record")
+@app.post("/trades/record")
+def record_paper_trade(trade: Dict[str, Any]):
+    """Records an executed paper trade into the audit ledger."""
+    try:
+        t = TradeDocument(
+            trade_id=trade["trade_id"],
+            symbol=trade["symbol"],
+            side=trade["side"],
+            size=float(trade.get("size", 1.0)),
+            entry_time=trade.get("entry_time", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+            exit_time=trade.get("exit_time", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+            entry_price=float(trade.get("entry_price", 0.0)),
+            exit_price=float(trade.get("exit_price", 0.0)),
+            fee_usd=float(trade.get("fee_usd", 0.0)),
+            slippage_bps=float(trade.get("slippage_bps", 1.0)),
+            realized_pnl_usd=float(trade.get("realized_pnl_usd", 0.0)),
+            realized_pnl_pct=float(trade.get("realized_pnl_pct", 0.0)),
+            exit_reason=trade.get("exit_reason", "TAKE_PROFIT")
+        )
+        supervisor.risk_sentinel.record_pnl(t.realized_pnl_usd)
+        supervisor.ledger.record_trade(t)
+        return {"status": "ok", "trade_id": t.trade_id}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":
