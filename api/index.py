@@ -1,30 +1,28 @@
 """
 Vercel Serverless Entrypoint for ZenTrader
+Defines a top-level FastAPI instance for Vercel's AST parser.
 """
 import sys
 import os
-import traceback
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# Add root folder to sys.path
+# Add project root directory to sys.path
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-try:
-    from zentrader.ui.server import app
-except Exception as e:
-    tb = traceback.format_exc()
-    from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse
+# TOP-LEVEL FASTAPI INSTANCE (Required by Vercel Python AST builder)
+app = FastAPI(title="ZenTrader Autonomous Platform", version="1.0.0")
 
-    app = FastAPI(title="ZenTrader Error Diagnostics")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    @app.get("/{full_path:path}")
-    def error_page(full_path: str = ""):
-        return HTMLResponse(
-            f"<html><body style='background:#0b0e14;color:#f87171;font-family:monospace;padding:24px;'>"
-            f"<h2>ZenTrader Serverless Diagnostic Traceback</h2>"
-            f"<pre style='background:#1e293b;padding:16px;border-radius:8px;overflow-x:auto;'>{tb}</pre>"
-            f"</body></html>",
-            status_code=500
-        )
+# Mount all ZenTrader routes from the core server
+from zentrader.ui.server import app as server_app
+app.include_router(server_app.router)
