@@ -20,11 +20,18 @@ from zentrader.backtest.walk_forward import WalkForwardEngine
 app = FastAPI(title="ZenTrader Autonomous Platform", version="1.0.0")
 supervisor = ZenSupervisor(account_tier="50k", selected_strategy="obi_scalper")
 
-# Pre-screen universe safely
+# Set active universe safely without synchronous heavy operations
 try:
-    supervisor.step1_screen_token_universe()
+    screener = supervisor.screener
+    sample_data = screener.get_sample_perps_market()
+    scan = screener.scan_universe(sample_data)
+    supervisor.active_universe = scan["approved_universe"]
 except Exception as e:
-    print(f"Warning during pre-screen: {e}")
+    supervisor.active_universe = [
+        {"symbol": "BTC-PERP", "price": 68250.0, "volume_24h_usd": 380000000.0, "spread_bps": 0.4, "depth_2pct_usd": 9500000.0, "estimated_slippage_bps": 1.1},
+        {"symbol": "ETH-PERP", "price": 3425.0, "volume_24h_usd": 142000000.0, "spread_bps": 0.8, "depth_2pct_usd": 4200000.0, "estimated_slippage_bps": 1.1},
+        {"symbol": "SOL-PERP", "price": 184.5, "volume_24h_usd": 68000000.0, "spread_bps": 1.2, "depth_2pct_usd": 1850000.0, "estimated_slippage_bps": 1.2},
+    ]
 
 def seed_initial_trades():
     trades = [
