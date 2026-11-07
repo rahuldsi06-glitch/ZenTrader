@@ -468,8 +468,92 @@
       }
     }
 
+// Real-time WebSocket connection to Hyperliquid Mainnet DEX
+    let hlSocket = null;
+    let currentSubCoin = null;
+
+    function connectHyperliquidWS(coin) {
+      if (hlSocket && hlSocket.readyState === WebSocket.OPEN && currentSubCoin === coin) {
+        return;
+      }
+
+      if (hlSocket) {
+        try {
+          if (currentSubCoin && hlSocket.readyState === WebSocket.OPEN) {
+            hlSocket.send(JSON.stringify({
+              method: "unsubscribe",
+              subscription: { type: "candle", coin: currentSubCoin, interval: "1m" }
+            }));
+          }
+          hlSocket.close();
+        } catch(e) {}
+      }
+
+      currentSubCoin = coin;
+      const statusText = document.getElementById('ws-status-text');
+      if (statusText) statusText.innerText = `CONNECTING ${coin}...`;
+
+      try {
+        hlSocket = new WebSocket("wss://api.hyperliquid.xyz/ws");
+
+        hlSocket.onopen = () => {
+          console.log(`[Hyperliquid WS] Connected. Subscribing to ${coin} 1m candles`);
+          if (statusText) statusText.innerText = `HYPERLIQUID LIVE: ${coin}`;
+          hlSocket.send(JSON.stringify({
+            method: "subscribe",
+            subscription: { type: "candle", coin: coin, interval: "1m" }
+          }));
+        };
+
+        hlSocket.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.channel === "candle" && msg.data) {
+              const d = msg.data;
+              if (d.s === currentSubCoin) {
+                const candle = {
+                  time: Math.floor(d.t / 1000),
+                  open: parseFloat(d.o),
+                  high: parseFloat(d.h),
+                  low: parseFloat(d.l),
+                  close: parseFloat(d.c)
+                };
+                if (candleSeries) {
+                  candleSeries.update(candle);
+                }
+                const badge = document.getElementById('live-price-badge');
+                if (badge) {
+                  const prev = parseFloat(badge.dataset.price || candle.close);
+                  const isUp = candle.close >= prev;
+                  badge.innerText = `$${candle.close.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: candle.close < 1 ? 4 : 2 })}`;
+                  badge.dataset.price = candle.close;
+                  badge.className = `font-mono font-bold text-sm px-2.5 py-0.5 rounded border transition-all duration-150 ${isUp ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-300' : 'border-rose-500/40 bg-rose-500/20 text-rose-300'}`;
+                }
+              }
+            }
+          } catch (e) {
+            console.error("[Hyperliquid WS] Message error:", e);
+          }
+        };
+
+        hlSocket.onerror = (e) => {
+          console.warn("[Hyperliquid WS] Error:", e);
+          if (statusText) statusText.innerText = `OFFLINE (POLLING)`;
+        };
+
+        hlSocket.onclose = () => {
+          setTimeout(() => {
+            if (currentSubCoin === coin) connectHyperliquidWS(coin);
+          }, 4000);
+        };
+      } catch (err) {
+        console.error("[Hyperliquid WS] Init failed:", err);
+      }
+    }
+
     async function loadCandles() {
       if (!candleSeries) return;
+      const coin = activeSymbol.replace("-PERP", "").toUpperCase();
       try {
         const res = await apiCall(`/candles?symbol=${encodeURIComponent(activeSymbol)}`);
         if (!res.ok) return;
@@ -481,10 +565,20 @@
             candleSeries.setMarkers(data.markers);
           }
           if (chart) chart.timeScale().fitContent();
+
+          const last = data.candles[data.candles.length - 1];
+          const badge = document.getElementById('live-price-badge');
+          if (badge && last) {
+            badge.innerText = `$${last.close.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: last.close < 1 ? 4 : 2 })}`;
+            badge.dataset.price = last.close;
+          }
         }
       } catch (e) {
         console.error("loadCandles error:", e);
       }
+
+      // Connect sub-second live Hyperliquid tick stream directly to chart
+      connectHyperliquidWS(coin);
     }
 
     // Execute Data Fetchers immediately
