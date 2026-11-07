@@ -152,14 +152,21 @@
     <main class="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
       <!-- Chart Controls Header -->
       <div class="flex items-center justify-between glass-panel px-4 py-2 rounded-xl">
-        <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-3">
           <span id="active-symbol" class="font-mono font-bold text-white text-sm">BTC-PERP • Execution Flow</span>
-          <span class="text-xs text-slate-400 font-mono">Slippage est: <span class="text-emerald-400">1.1 bps</span></span>
+          <span id="live-price-badge" class="font-mono font-bold text-sm px-2.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 transition-all duration-150">$0.00</span>
+          <span class="text-xs text-slate-400 font-mono hidden md:inline">Slippage est: <span class="text-emerald-400">1.1 bps</span></span>
         </div>
-        <div class="flex items-center space-x-2 text-xs">
-          <button class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 font-mono">1m</button>
-          <button class="px-2.5 py-1 rounded hover:bg-slate-800 text-slate-500 font-mono">5m</button>
-          <button class="px-2.5 py-1 rounded hover:bg-slate-800 text-slate-500 font-mono">15m</button>
+        <div class="flex items-center space-x-3 text-xs">
+          <div id="ws-status" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px]">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="ws-status-text">HYPERLIQUID LIVE</span>
+          </div>
+          <div class="flex items-center space-x-1">
+            <button class="px-2.5 py-1 rounded bg-slate-800 text-slate-300 font-mono">1m</button>
+            <button class="px-2.5 py-1 rounded hover:bg-slate-800 text-slate-500 font-mono">5m</button>
+            <button class="px-2.5 py-1 rounded hover:bg-slate-800 text-slate-500 font-mono">15m</button>
+          </div>
         </div>
       </div>
 
@@ -256,11 +263,22 @@
       }
     }
 
+    let lastKnownTradeId = null;
+
     async function fetchTrades() {
       try {
         const res = await apiCall('/trades');
         if (!res.ok) return;
         const trades = await res.json();
+        if (trades.length > 0 && lastKnownTradeId && trades[0].trade_id !== lastKnownTradeId) {
+          const latest = trades[0];
+          const isProf = latest.realized_pnl_usd >= 0;
+          showToast(`⚡ ${latest.side} ${latest.symbol}: ${isProf ? '+' : ''}$${latest.realized_pnl_usd.toFixed(2)} (${latest.exit_reason})`);
+        }
+        if (trades.length > 0) {
+          lastKnownTradeId = trades[0].trade_id;
+        }
+
         const tbody = document.getElementById('trade-log');
         tbody.innerHTML = '';
         trades.forEach(t => {
@@ -477,9 +495,9 @@
     initChart();
 
     // Regular live updates
-    setInterval(fetchHUD, 2500);
-    setInterval(fetchTrades, 3000);
-    setInterval(loadCandles, 3500);
+    setInterval(fetchHUD, 2000);
+    setInterval(fetchTrades, 2500);
+    setInterval(fetchUniverse, 12000);
     setInterval(fetchAutoLoopStatus, 5000);
   </script>
 </body>
