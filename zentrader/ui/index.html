@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ZenTrader | Autonomous Perp Trading Terminal</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Inter', sans-serif; background-color: #07090e; }
@@ -164,8 +164,8 @@
       </div>
 
       <!-- Canvas for Lightweight Charts -->
-      <div id="chart-wrapper" class="flex-1 rounded-2xl glass-panel relative overflow-hidden flex flex-col min-h-[300px]">
-        <div id="chart-container" class="w-full h-full flex-1"></div>
+      <div id="chart-wrapper" class="flex-1 rounded-2xl glass-panel relative overflow-hidden flex flex-col min-h-[320px]">
+        <div id="chart-container" class="w-full h-full flex-1 min-h-[300px]"></div>
         <div id="pnl-toast" class="absolute top-4 right-4 z-10 hidden bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-2 rounded-xl text-xs font-mono font-bold shadow-xl flex items-center gap-2">
           <span>▲ EXECUTION PING</span>
         </div>
@@ -379,27 +379,64 @@
       setTimeout(() => toast.classList.add('hidden'), 3500);
     }
 
-    // Initialize TradingView Chart
+    // Initialize TradingView Chart safely
+    let chart = null;
+    let candleSeries = null;
     const container = document.getElementById('chart-container');
-    const chart = LightweightCharts.createChart(container, {
-      width: container.clientWidth || 800,
-      height: container.clientHeight || 400,
-      layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
-      grid: { vertLines: { color: 'rgba(255, 255, 255, 0.03)' }, horzLines: { color: 'rgba(255, 255, 255, 0.03)' } },
-      timeScale: { 
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-        timeVisible: true,
-        secondsVisible: false
-      }
-    });
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#10b981', downColor: '#f43f5e',
-      borderVisible: false,
-      wickUpColor: '#10b981', wickDownColor: '#f43f5e'
-    });
+    function initChart() {
+      try {
+        if (typeof LightweightCharts === 'undefined') {
+          console.warn("LightweightCharts library not yet loaded, retrying...");
+          setTimeout(initChart, 500);
+          return;
+        }
+
+        const width = container.clientWidth || 800;
+        const height = container.clientHeight || 350;
+
+        chart = LightweightCharts.createChart(container, {
+          width: width,
+          height: height,
+          layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+          grid: { vertLines: { color: 'rgba(255, 255, 255, 0.03)' }, horzLines: { color: 'rgba(255, 255, 255, 0.03)' } },
+          timeScale: { 
+            borderColor: 'rgba(255, 255, 255, 0.08)',
+            timeVisible: true,
+            secondsVisible: false
+          }
+        });
+
+        const seriesOptions = {
+          upColor: '#10b981', downColor: '#f43f5e',
+          borderVisible: false,
+          wickUpColor: '#10b981', wickDownColor: '#f43f5e'
+        };
+
+        if (typeof chart.addCandlestickSeries === 'function') {
+          candleSeries = chart.addCandlestickSeries(seriesOptions);
+        } else if (typeof chart.addSeries === 'function' && LightweightCharts.CandlestickSeries) {
+          candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, seriesOptions);
+        }
+
+        console.log("Chart initialized successfully");
+        loadCandles();
+
+        // Resize Observer
+        const ro = new ResizeObserver(() => {
+          if (chart && container.clientWidth > 0 && container.clientHeight > 0) {
+            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+          }
+        });
+        ro.observe(container);
+
+      } catch (err) {
+        console.error("initChart error:", err);
+      }
+    }
 
     async function loadCandles() {
+      if (!candleSeries) return;
       try {
         const res = await fetch(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}`);
         if (!res.ok) return;
@@ -410,27 +447,19 @@
           if (data.markers && data.markers.length > 0) {
             candleSeries.setMarkers(data.markers);
           }
-          chart.timeScale().fitContent();
+          if (chart) chart.timeScale().fitContent();
         }
       } catch (e) {
         console.error("loadCandles error:", e);
       }
     }
 
-    // Auto-resize observer
-    const ro = new ResizeObserver(() => {
-      if (container.clientWidth > 0 && container.clientHeight > 0) {
-        chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-      }
-    });
-    ro.observe(container);
-
-    // Initial Load & Polling Loops
+    // Execute Data Fetchers immediately
     fetchHUD();
     fetchTrades();
     fetchUniverse();
     fetchAutoLoopStatus();
-    loadCandles();
+    initChart();
 
     // Regular live updates
     setInterval(fetchHUD, 2500);
