@@ -38,3 +38,13 @@ async def fix_vercel_paths(request: Request, call_next):
 # Mount all ZenTrader routes from the core server
 from zentrader.ui.server import app as server_app
 app.include_router(server_app.router)
+
+@app.api_route("/debug-path/{subpath:path}", methods=["GET", "POST"])
+@app.api_route("/api/debug-path/{subpath:path}", methods=["GET", "POST"])
+def debug_path(request: Request, subpath: str = ""):
+    return {
+        "url_path": request.url.path,
+        "scope_path": request.scope.get("path"),
+        "subpath": subpath,
+        "query": str(request.query_params)
+    }
