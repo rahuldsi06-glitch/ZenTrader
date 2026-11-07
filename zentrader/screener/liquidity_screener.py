@@ -96,13 +96,17 @@ class LiquidityScreener:
         Fetches live perpetual contracts from Hyperliquid DEX API,
         filtering for tokens with deep liquidity and active orderbook volume.
         """
-        import requests
+        import urllib.request
+        import json
         try:
-            r = requests.post("https://api.hyperliquid.xyz/info", json={"type": "metaAndAssetCtxs"}, timeout=5)
-            if r.status_code != 200:
-                return LiquidityScreener.get_sample_perps_market()
-
-            meta, ctxs = r.json()
+            req = urllib.request.Request(
+                "https://api.hyperliquid.xyz/info",
+                data=json.dumps({"type": "metaAndAssetCtxs"}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "ZenTrader/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            meta, ctxs = data
             tokens = []
             for u, c in zip(meta.get("universe", []), ctxs):
                 vol = float(c.get("dayNtlVlm", 0))

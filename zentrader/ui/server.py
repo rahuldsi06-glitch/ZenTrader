@@ -70,7 +70,8 @@ except Exception as e:
 
 def fetch_real_hyperliquid_candles(coin: str, bars: int = 100):
     """Fetches real-time 1m candles from Hyperliquid Mainnet API."""
-    import requests
+    import urllib.request
+    import json
     try:
         now_ms = int(time.time() * 1000)
         start_ms = now_ms - (bars * 60 * 1000)
@@ -83,10 +84,17 @@ def fetch_real_hyperliquid_candles(coin: str, bars: int = 100):
                 "endTime": now_ms
             }
         }
-        r = requests.post("https://api.hyperliquid.xyz/info", json=payload, timeout=5)
-        if r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0:
+        req = urllib.request.Request(
+            "https://api.hyperliquid.xyz/info",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "ZenTrader/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        if isinstance(data, list) and len(data) > 0:
             candles = []
-            for c in r.json():
+            for c in data:
                 candles.append({
                     "time": int(c["t"] // 1000),
                     "open": float(c["o"]),
