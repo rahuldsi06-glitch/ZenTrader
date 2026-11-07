@@ -224,10 +224,12 @@ class WalkForwardEngine:
 
         price_series = start_price * np.exp(np.cumsum(returns))
 
-        highs = price_series * (1.0 + np.abs(np.random.normal(0.0005, 0.0015, bars)))
-        lows = price_series * (1.0 - np.abs(np.random.normal(0.0005, 0.0015, bars)))
-        opens = price_series * (1.0 + np.random.normal(0.0, 0.0005, bars))
+        opens = np.roll(price_series, 1)
+        opens[0] = start_price
         closes = price_series
+        spread = np.abs(np.random.normal(0.0008, 0.0004, bars)) * price_series
+        highs = np.maximum(opens, closes) + spread
+        lows = np.minimum(opens, closes) - spread
         volumes = np.random.lognormal(mean=8.5, sigma=0.8, size=bars)
 
         return pd.DataFrame({
