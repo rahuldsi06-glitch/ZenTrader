@@ -1,6 +1,7 @@
 """
 ZenTrader FastAPI Web Application & API
 Powers the Gamified Trading Terminal with Live Lightweight-Charts and Telemetry.
+Serverless-ready for Vercel and local runtimes.
 """
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -19,10 +20,12 @@ from zentrader.backtest.walk_forward import WalkForwardEngine
 app = FastAPI(title="ZenTrader Autonomous Platform", version="1.0.0")
 supervisor = ZenSupervisor(account_tier="50k", selected_strategy="obi_scalper")
 
-# Pre-screen universe
-supervisor.step1_screen_token_universe()
+# Pre-screen universe safely
+try:
+    supervisor.step1_screen_token_universe()
+except Exception as e:
+    print(f"Warning during pre-screen: {e}")
 
-# Seed initial realistic paper trades so the UI journal has rich data immediately
 def seed_initial_trades():
     trades = [
         ("SOL-PERP", "LONG", 15.0, 182.40, 184.85, 0.9, 36.75, 1.34, "TAKE_PROFIT"),
@@ -53,10 +56,13 @@ def seed_initial_trades():
             exit_reason=reason
         ))
 
-seed_initial_trades()
+try:
+    seed_initial_trades()
+except Exception as e:
+    print(f"Warning seeding trades: {e}")
 
-# Dynamic market candle store
 _candle_cache = {}
+_last_tick_time = time.time()
 
 def get_or_create_candles(symbol: str = "BTC-PERP"):
     if symbol not in _candle_cache:
@@ -75,82 +81,84 @@ def get_or_create_candles(symbol: str = "BTC-PERP"):
         _candle_cache[symbol] = candles
     return _candle_cache[symbol]
 
+def advance_market_tick():
+    """Generates an incremental price step (serverless-friendly)."""
+    global _last_tick_time
+    now = time.time()
+    if now - _last_tick_time < 3.0:
+        return
+    _last_tick_time = now
 
-# Background live market streamer (simulates incoming perp ticks every 3 seconds)
-def _market_ticker_daemon():
     symbols = ["BTC-PERP", "ETH-PERP", "SOL-PERP", "AVAX-PERP"]
-    while True:
-        try:
+    for sym in symbols:
+        c_list = get_or_create_candles(sym)
+        if not c_list:
+            continue
+        last_c = c_list[-1]
+        new_time = last_c["time"] + 300
+        change = random.gauss(0.0002, 0.0015)
+        new_open = last_c["close"]
+        new_close = round(new_open * (1.0 + change), 2)
+        spread = abs(new_open - new_close) + round(new_open * 0.0005, 2)
+        new_high = round(max(new_open, new_close) + spread, 2)
+        new_low = round(min(new_open, new_close) - spread, 2)
+
+        c_list.append({
+            "time": new_time,
+            "open": new_open,
+            "high": new_high,
+            "low": new_low,
+            "close": new_close
+        })
+        if len(c_list) > 100:
+            c_list.pop(0)
+
+# In non-serverless local environments, run a background ticker
+if not os.environ.get("VERCEL"):
+    def _local_ticker_loop():
+        while True:
             time.sleep(3)
-            if supervisor.risk_sentinel.is_halted:
-                continue
+            advance_market_tick()
+    threading.Thread(target=_local_ticker_loop, daemon=True).start()
 
-            for sym in symbols:
-                c_list = get_or_create_candles(sym)
-                if not c_list:
-                    continue
-                last_c = c_list[-1]
-                new_time = last_c["time"] + 300  # 5 min step
 
-                # Slight random walk
-                change = random.gauss(0.0002, 0.0015)
-                new_open = last_c["close"]
-                new_close = round(new_open * (1.0 + change), 2)
-                spread = abs(new_open - new_close) + round(new_open * 0.0005, 2)
-                new_high = round(max(new_open, new_close) + spread, 2)
-                new_low = round(min(new_open, new_close) - spread, 2)
+def find_index_html() -> str:
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "index.html"),
+        os.path.join(os.getcwd(), "zentrader", "ui", "index.html"),
+        os.path.join(os.getcwd(), "public", "index.html"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "public", "index.html"),
+        os.path.join(os.getcwd(), "index.html")
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
 
-                c_list.append({
-                    "time": new_time,
-                    "open": new_open,
-                    "high": new_high,
-                    "low": new_low,
-                    "close": new_close
-                })
-                if len(c_list) > 100:
-                    c_list.pop(0)
-
-            # Occasionally generate a live paper trade (1 out of 5 cycles)
-            if random.random() < 0.25:
-                sym = random.choice(["SOL-PERP", "BTC-PERP", "ETH-PERP"])
-                side = random.choice(["LONG", "SHORT"])
-                price = _candle_cache[sym][-1]["close"]
-                pnl = round(random.choice([15.0, 32.5, 48.0, 75.0, -22.0, 95.0, -35.0]), 2)
-                size = round(15.0 if "SOL" in sym else (0.2 if "BTC" in sym else 1.5), 3)
-
-                now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                supervisor.risk_sentinel.record_pnl(pnl)
-                supervisor.ledger.record_trade(TradeDocument(
-                    trade_id=f"ZT-{random.randint(1000, 9999)}",
-                    symbol=sym,
-                    side=side,
-                    size=size,
-                    entry_time=(datetime.utcnow() - timedelta(minutes=4)).strftime("%Y-%m-%d %H:%M:%S"),
-                    exit_time=now_str,
-                    entry_price=price,
-                    exit_price=round(price + (pnl / size if side == "LONG" else -pnl / size), 2),
-                    fee_usd=round(price * size * 0.00035, 2),
-                    slippage_bps=1.1,
-                    realized_pnl_usd=pnl,
-                    realized_pnl_pct=round((pnl / (price * size)) * 100, 2),
-                    exit_reason="TAKE_PROFIT" if pnl > 0 else "STOP_LOSS"
-                ))
-
-        except Exception as e:
-            pass
-
-threading.Thread(target=_market_ticker_daemon, daemon=True).start()
+    return "<h1>ZenTrader API is Active. Index HTML file not located.</h1>"
 
 
 @app.get("/", response_class=HTMLResponse)
 def get_ui():
-    html_path = os.path.join(os.path.dirname(__file__), "index.html")
-    with open(html_path, "r") as f:
-        return f.read()
+    advance_market_tick()
+    return find_index_html()
+
+
+@app.get("/api/health")
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "service": "ZenTrader Platform",
+        "runtime": "vercel" if os.environ.get("VERCEL") else "standalone",
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 @app.get("/api/hud")
+@app.get("/hud")
 def get_hud():
+    advance_market_tick()
     hud = supervisor.risk_sentinel.get_hud_telemetry()
     return {
         "tier": supervisor.tier_key,
@@ -170,16 +178,20 @@ def get_hud():
 
 
 @app.get("/api/trades")
+@app.get("/trades")
 def get_trades(limit: int = 25):
+    advance_market_tick()
     return supervisor.ledger.get_recent_trades(limit=limit)
 
 
 @app.get("/api/universe")
+@app.get("/universe")
 def get_universe():
     return supervisor.active_universe
 
 
 @app.post("/api/tier")
+@app.post("/tier")
 def switch_tier(tier: str = Query("50k")):
     if tier in ACCOUNT_TIERS:
         supervisor.tier_key = tier
@@ -190,6 +202,7 @@ def switch_tier(tier: str = Query("50k")):
 
 
 @app.post("/api/panic")
+@app.post("/panic")
 def panic_halt():
     supervisor.risk_sentinel.trigger_circuit_breaker("USER_TRIGGERED_EMERGENCY_HALT")
     supervisor.broker.flatten_all_positions(current_prices={}, reason="PANIC_BUTTON")
@@ -197,27 +210,31 @@ def panic_halt():
 
 
 @app.get("/api/auto_loop")
+@app.get("/auto_loop")
 def get_auto_loop_status():
     return supervisor.auto_optimizer.get_status()
 
 
 @app.post("/api/auto_loop/toggle")
+@app.post("/auto_loop/toggle")
 def toggle_auto_loop(enabled: bool = Query(...), interval_sec: int = Query(60)):
     status = supervisor.auto_optimizer.toggle(enabled=enabled, interval_sec=interval_sec)
     return status
 
 
 @app.post("/api/auto_loop/run_now")
+@app.post("/auto_loop/run_now")
 def run_auto_loop_now():
     result = supervisor.auto_optimizer.run_cycle_now()
     return result
 
 
 @app.get("/api/candles")
+@app.get("/candles")
 def get_candles(symbol: str = "BTC-PERP"):
+    advance_market_tick()
     candles = get_or_create_candles(symbol)
     
-    # Calculate markers on known bars
     markers = []
     if len(candles) >= 30:
         markers.append({
