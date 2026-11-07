@@ -6,6 +6,7 @@ import sys
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.requests import Request
 
 # Add project root directory to sys.path
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +23,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def fix_vercel_paths(request: Request, call_next):
+    """Normalizes any internal Vercel rewrite paths so routing never fails."""
+    path = request.scope.get("path", "")
+    if path.startswith("/api/index.py"):
+        request.scope["path"] = path.replace("/api/index.py", "") or "/"
+    elif path == "/api" or path == "/api/":
+        request.scope["path"] = "/"
+    response = await call_next(request)
+    return response
 
 # Mount all ZenTrader routes from the core server
 from zentrader.ui.server import app as server_app
