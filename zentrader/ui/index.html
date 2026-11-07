@@ -205,9 +205,24 @@
   <script>
     let activeSymbol = "BTC-PERP";
 
+    // Smart API fetcher supporting both /api/endpoint and /endpoint across Vercel & local
+    async function apiCall(endpoint, options = {}) {
+      const url1 = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+      const url2 = url1.startsWith('/api') ? url1.replace('/api', '') : '/api' + url1;
+      try {
+        let res = await fetch(url1, options);
+        if (res.status === 404) {
+          res = await fetch(url2, options);
+        }
+        return res;
+      } catch (e) {
+        return await fetch(url2, options);
+      }
+    }
+
     async function fetchHUD() {
       try {
-        const res = await fetch('/api/hud');
+        const res = await apiCall('/hud');
         if (!res.ok) return;
         const data = await res.json();
         
@@ -243,7 +258,7 @@
 
     async function fetchTrades() {
       try {
-        const res = await fetch('/api/trades');
+        const res = await apiCall('/trades');
         if (!res.ok) return;
         const trades = await res.json();
         const tbody = document.getElementById('trade-log');
@@ -272,7 +287,7 @@
 
     async function fetchUniverse() {
       try {
-        const res = await fetch('/api/universe');
+        const res = await apiCall('/universe');
         if (!res.ok) return;
         const universe = await res.json();
         const container = document.getElementById('universe-list');
@@ -309,7 +324,7 @@
 
     async function fetchAutoLoopStatus() {
       try {
-        const res = await fetch('/api/auto_loop');
+        const res = await apiCall('/auto_loop');
         if (!res.ok) return;
         const data = await res.json();
         const toggle = document.getElementById('auto-loop-toggle');
@@ -333,7 +348,7 @@
 
     async function toggleAutoLoop(enabled) {
       const interval = document.getElementById('auto-loop-interval').value;
-      await fetch(`/api/auto_loop/toggle?enabled=${enabled}&interval_sec=${interval}`, { method: 'POST' });
+      await apiCall(`/auto_loop/toggle?enabled=${enabled}&interval_sec=${interval}`, { method: 'POST' });
       showToast(enabled ? `Auto Re-optimization Loop ENABLED (${interval}s)` : 'Auto Re-optimization Loop PAUSED');
       fetchAutoLoopStatus();
     }
@@ -348,7 +363,7 @@
     async function triggerReoptimizationNow() {
       showToast('🔄 Running Walk-Forward Re-optimization...');
       document.getElementById('auto-loop-status').innerText = 'AUDITING...';
-      const res = await fetch('/api/auto_loop/run_now', { method: 'POST' });
+      const res = await apiCall('/auto_loop/run_now', { method: 'POST' });
       const data = await res.json();
       showToast(`Audit Complete: WFE ${(data.wfe*100).toFixed(0)}% (Sharpe ${data.sharpe_oos})`);
       fetchAutoLoopStatus();
@@ -356,7 +371,7 @@
     }
 
     async function setTier(tier) {
-      await fetch(`/api/tier?tier=${tier}`, { method: 'POST' });
+      await apiCall(`/tier?tier=${tier}`, { method: 'POST' });
       document.querySelectorAll('.tier-btn').forEach(b => {
         b.className = 'tier-btn px-3 py-1 rounded-lg text-slate-400 hover:text-white transition';
       });
@@ -367,7 +382,7 @@
     }
 
     async function emergencyHalt() {
-      await fetch('/api/panic', { method: 'POST' });
+      await apiCall('/panic', { method: 'POST' });
       alert("🚨 EMERGENCY HALT TRIGGERED: Positions Flattened & Trading Locked.");
       fetchHUD();
     }
@@ -438,7 +453,7 @@
     async function loadCandles() {
       if (!candleSeries) return;
       try {
-        const res = await fetch(`/api/candles?symbol=${encodeURIComponent(activeSymbol)}`);
+        const res = await apiCall(`/candles?symbol=${encodeURIComponent(activeSymbol)}`);
         if (!res.ok) return;
         const data = await res.json();
         
